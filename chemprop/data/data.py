@@ -10,7 +10,7 @@ from rdkit import Chem
 from .scaler import StandardScaler
 from chemprop.features import get_features_generator
 from chemprop.features import BatchMolGraph, MolGraph
-from chemprop.features import is_explicit_h, is_reaction, is_adding_hs
+from chemprop.features import is_explicit_h, is_reaction, is_adding_hs, is_polymer
 from chemprop.rdkit import make_mol
 
 # Cache of graph featurizations
@@ -97,6 +97,7 @@ class MoleculeDatapoint:
         self.overwrite_default_atom_features = overwrite_default_atom_features
         self.overwrite_default_bond_features = overwrite_default_bond_features
         self.is_reaction = is_reaction()
+        self.is_polymer = is_polymer()
         self.is_explicit_h = is_explicit_h()
         self.is_adding_hs = is_adding_hs()
         
@@ -149,7 +150,7 @@ class MoleculeDatapoint:
     @property
     def mol(self) -> Union[List[Chem.Mol], List[Tuple[Chem.Mol, Chem.Mol]]]:
         """Gets the corresponding list of RDKit molecules for the corresponding SMILES list."""
-        mol = make_mols(self.smiles, self.is_reaction, self.is_explicit_h, self.is_adding_hs)
+        mol = make_mols(self.smiles, self.is_reaction, self.is_polymer, self.is_explicit_h, self.is_adding_hs)
 
         if cache_mol():
             for s, m in zip(self.smiles, mol):
@@ -679,7 +680,7 @@ class MoleculeDataLoader(DataLoader):
         return super(MoleculeDataLoader, self).__iter__()
 
     
-def make_mols(smiles: List[str], reaction: bool, keep_h: bool, add_h: bool):
+def make_mols(smiles: List[str], reaction: bool, polymer: bool, keep_h: bool, add_h: bool):
     """
     Builds a list of RDKit molecules (or a list of tuples of molecules if reaction is True) for a list of smiles.
 
@@ -691,6 +692,8 @@ def make_mols(smiles: List[str], reaction: bool, keep_h: bool, add_h: bool):
     """
     if reaction:
         mol = [SMILES_TO_MOL[s] if s in SMILES_TO_MOL else (make_mol(s.split(">")[0], keep_h, add_h), make_mol(s.split(">")[-1], keep_h, add_h)) for s in smiles]
+    elif polymer:
+        mol = [SMILES_TO_MOL[s] if s in SMILES_TO_MOL else make_mol(s.split("<")[0], keep_h, add_h) for s in smiles]
     else:
         mol = [SMILES_TO_MOL[s] if s in SMILES_TO_MOL else make_mol(s, keep_h, add_h) for s in smiles]
     return mol
