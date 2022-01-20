@@ -1,6 +1,7 @@
 from typing import List, Tuple, Union
 from itertools import zip_longest
 from copy import deepcopy
+from collections import Counter
 import logging
 
 from rdkit import Chem
@@ -322,13 +323,20 @@ def remove_wildcard_atoms(rwmol):
 
 
 def parse_polymer_rules(rules):
-    # TODO: add check that weights for each attachment point add up to 1
     polymer_info = []
+    counter = Counter()  # used for validating the input
     for rule in rules:
-        idx1 = rule.split(':')[0].split('-')[0]
-        idx2 = rule.split(':')[0].split('-')[1]
+        idx1, idx2 = rule.split(':')[0].split('-')
         w = float(rule.split(':')[1])
         polymer_info.append((idx1, idx2, w))
+        counter[idx1] += float(w)
+        counter[idx2] += float(w)
+
+    # validate input: sum of weights should be one
+    for k, v in counter.items():
+        if np.isclose(v, 1.0) is False:
+            raise ValueError(f'sum of input probabilities for stochastic edges should be 1 -- found {v} for [*:{k}]')
+
     return polymer_info
 
 
