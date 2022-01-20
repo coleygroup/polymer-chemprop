@@ -693,7 +693,8 @@ def make_mols(smiles: List[str], reaction: bool, polymer: bool, keep_h: bool, ad
     if reaction:
         mol = [SMILES_TO_MOL[s] if s in SMILES_TO_MOL else (make_mol(s.split(">")[0], keep_h, add_h), make_mol(s.split(">")[-1], keep_h, add_h)) for s in smiles]
     elif polymer:
-        mol = [SMILES_TO_MOL[s] if s in SMILES_TO_MOL else make_mol(s.split("<")[0], keep_h, add_h) for s in smiles]
+        # TODO: use BigSMILES notation as input for polymers with a dedicated parser
+        mol = [SMILES_TO_MOL[s] if s in SMILES_TO_MOL else (make_mol(s.split("<")[0], keep_h, add_h), s.split("<")[1:]) for s in smiles]
     else:
         mol = [SMILES_TO_MOL[s] if s in SMILES_TO_MOL else make_mol(s, keep_h, add_h) for s in smiles]
     return mol
