@@ -14,7 +14,8 @@ from chemprop.args import TrainArgs
 from chemprop.constants import TEST_SCORES_FILE_NAME, TRAIN_LOGGER_NAME
 from chemprop.data import get_data, get_task_names, MoleculeDataset, validate_dataset_type
 from chemprop.utils import create_logger, makedirs, timeit
-from chemprop.features import set_extra_atom_fdim, set_extra_bond_fdim, set_explicit_h, set_adding_hs, set_reaction, reset_featurization_parameters
+from chemprop.features import set_extra_atom_fdim, set_extra_bond_fdim, set_explicit_h, set_adding_hs, set_reaction, \
+    reset_featurization_parameters, set_polymer
 
 
 @timeit(logger_name=TRAIN_LOGGER_NAME)
@@ -60,11 +61,12 @@ def cross_validate(args: TrainArgs,
         debug('Could not write the reproducibility section of the arguments to file, thus omitting this section.')
         args.save(os.path.join(args.save_dir, 'args.json'), with_reproducibility=False)
 
-    #set explicit H option and reaction option
+    # set explicit H option and reaction option
     reset_featurization_parameters(logger=logger)
     set_explicit_h(args.explicit_h)
     set_adding_hs(args.adding_h)
     set_reaction(args.reaction, args.reaction_mode)
+    set_polymer(args.polymer)
         
     # Get data
     debug('Loading data')

@@ -355,6 +355,10 @@ class TrainArgs(CommonArgs):
     """
     Whether to adjust MPNN layer to take reactions as input instead of molecules.
     """
+    polymer: bool = False
+    """
+    Whether to adjust the MPNN to take polymers as input instead of molecules.
+    """
     reaction_mode: Literal['reac_prod', 'reac_diff', 'prod_diff', 'reac_prod_balance', 'reac_diff_balance', 'prod_diff_balance'] = 'reac_diff'
     """
     Choices for construction of atom and bond features for reactions

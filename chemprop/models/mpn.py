@@ -78,8 +78,9 @@ class MPNEncoder(nn.Module):
             atom_descriptors_batch = [np.zeros([1, atom_descriptors_batch[0].shape[1]])] + atom_descriptors_batch   # padding the first with 0 to match the atom_hiddens
             atom_descriptors_batch = torch.from_numpy(np.concatenate(atom_descriptors_batch, axis=0)).float().to(self.device)
 
-        f_atoms, f_bonds, a2b, b2a, b2revb, a_scope, b_scope = mol_graph.get_components(atom_messages=self.atom_messages)
-        f_atoms, f_bonds, a2b, b2a, b2revb = f_atoms.to(self.device), f_bonds.to(self.device), a2b.to(self.device), b2a.to(self.device), b2revb.to(self.device)
+        f_atoms, f_bonds, w_bonds, a2b, b2a, b2revb, a_scope, b_scope = mol_graph.get_components(atom_messages=self.atom_messages)
+        f_atoms, f_bonds, w_bonds, a2b, b2a, b2revb = f_atoms.to(self.device), f_bonds.to(self.device), w_bonds.to(self.device), \
+                                                      a2b.to(self.device), b2a.to(self.device), b2revb.to(self.device)
 
         if self.atom_messages:
             a2a = mol_graph.get_a2a().to(self.device)
@@ -105,6 +106,11 @@ class MPNEncoder(nn.Module):
                 # m(a1 -> a2) = [sum_{a0 \in nei(a1)} m(a0 -> a1)] - m(a2 -> a1)
                 # message      a_message = sum(nei_a_message)      rev_message
                 nei_a_message = index_select_ND(message, a2b)  # num_atoms x max_num_bonds x hidden
+                nei_a_weight = index_select_ND(w_bonds, a2b)  # num_atoms x max_num_bonds
+                # weight nei_a_message based on edge weights
+                # m(a1 -> a2) = [sum_{a0 \in nei(a1)} m(a0 -> a1) * weight(a0 -> a1)] - m(a2 -> a1)
+                # message      a_message = dot(nei_a_message,nei_a_weight)      rev_message
+                nei_a_message = nei_a_message * nei_a_weight[..., None]  # num_atoms x max_num_bonds x hidden
                 a_message = nei_a_message.sum(dim=1)  # num_atoms x hidden
                 rev_message = message[b2revb]  # num_bonds x hidden
                 message = a_message[b2a] - rev_message  # num_bonds x hidden
@@ -115,6 +121,7 @@ class MPNEncoder(nn.Module):
 
         a2x = a2a if self.atom_messages else a2b
         nei_a_message = index_select_ND(message, a2x)  # num_atoms x max_num_bonds x hidden
+        # NOTE: other place where we could have the weights
         a_message = nei_a_message.sum(dim=1)  # num_atoms x hidden
         a_input = torch.cat([f_atoms, a_message], dim=1)  # num_atoms x (atom_fdim + hidden)
         atom_hiddens = self.act_func(self.W_o(a_input))  # num_atoms x hidden

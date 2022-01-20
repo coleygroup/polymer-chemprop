@@ -45,6 +45,7 @@ class Featurization_parameters:
         self.REACTION_MODE = None
         self.EXPLICIT_H = False
         self.REACTION = False
+        self.POLYMER = False
         self.ADDING_H = False
 
 # Create a global parameter object for reference throughout this module
@@ -91,6 +92,15 @@ def set_adding_hs(adding_hs: bool) -> None:
     PARAMS.ADDING_H = adding_hs
 
 
+def set_polymer(polymer: bool) -> None:
+    """
+    Sets whether RDKit molecules are two monomers of a co-polymer.
+
+    :param polymer: Boolean whether input is two monomer units of a co-polymer.
+    """
+    PARAMS.POLYMER = polymer
+
+
 def set_reaction(reaction: bool, mode: str) -> None:
     """
     Sets whether to use a reaction or molecule as input and adapts feature dimensions.
@@ -119,6 +129,11 @@ def is_adding_hs() -> bool:
 def is_reaction() -> bool:
     r"""Returns whether to use reactions as input"""
     return PARAMS.REACTION
+
+
+def is_polymer() -> bool:
+    r"""Returns whether to the molecule is a polymer"""
+    return PARAMS.POLYMER
 
 
 def reaction_mode() -> str:
@@ -266,6 +281,45 @@ def map_reac_to_prod(mol_reac: Chem.Mol, mol_prod: Chem.Mol):
     return reac_id_to_prod_id, only_prod_ids, only_reac_ids
 
 
+def tag_atoms_in_repeating_unit(mol):
+    atoms = [a for a in mol.GetAtoms()]
+    neighbor_map = {}
+
+    # go through each atoms and: (i) get index of attachment atoms, (ii) tag all non-R atoms
+    for atom in atoms:
+        # if R atom
+        if '*' in atom.GetSmarts():
+            # get index of atom it is attached to
+            neighbors = atom.GetNeighbors()
+            assert len(neighbors) == 1
+            neighbor_idx = neighbors[0].GetIdx()
+            neighbor_map[neighbor_idx] = atom.GetSmarts().strip('[]').replace(':', '')
+            # tag it as non-core atom
+            atom.SetBoolProp('core', False)
+        # if not R atom
+        else:
+            # tag it as core atom
+            atom.SetBoolProp('core', True)
+
+    # use the map created to tag attachment atoms
+    for atom in atoms:
+        if atom.GetIdx() in neighbor_map.keys():
+            atom.SetProp('R', neighbor_map[atom.GetIdx()])
+        else:
+            atom.SetProp('R', '')
+
+    return mol
+
+
+def remove_wildcard_atoms(rwmol):
+    indices = [a.GetIdx() for a in rwmol.GetAtoms() if '*' in a.GetSmarts()]
+    while len(indices) > 0:
+        rwmol.RemoveAtom(indices[0])
+        indices = [a.GetIdx() for a in rwmol.GetAtoms() if '*' in a.GetSmarts()]
+    Chem.SanitizeMol(rwmol, Chem.SanitizeFlags.SANITIZE_ALL)
+    return rwmol
+
+
 class MolGraph:
     """
     A :class:`MolGraph` represents the graph structure and featurization of a single molecule.
@@ -295,6 +349,8 @@ class MolGraph:
         :param overwrite_default_atom_features: Boolean to overwrite default atom features by atom_features instead of concatenating
         :param overwrite_default_bond_features: Boolean to overwrite default bond features by bond_features instead of concatenating
         """
+        self.is_polymer = is_polymer()
+        self.polymer_info = []
         self.is_reaction = is_reaction()
         self.is_explicit_h = is_explicit_h()
         self.is_adding_hs = is_adding_hs()
@@ -303,7 +359,19 @@ class MolGraph:
         # Convert SMILES to RDKit molecule if necessary
         if type(mol) == str:
             if self.is_reaction:
-                mol = (make_mol(mol.split(">")[0], self.is_explicit_h, self.is_adding_hs), make_mol(mol.split(">")[-1], self.is_explicit_h, self.is_adding_hs)) 
+                mol = (make_mol(mol.split(">")[0], self.is_explicit_h, self.is_adding_hs),
+                       make_mol(mol.split(">")[-1], self.is_explicit_h, self.is_adding_hs))
+            elif self.is_polymer:
+                # TODO: use BigSMILES notation as input for polymers with a dedicated parser
+                rules = mol.split('<')[1:]
+                mol = make_mol(mol.split("<")[0], self.is_explicit_h, self.is_adding_hs)
+                # parse rules on monomer connections
+                for rule in rules:
+                    idx1 = rule.split(':')[0].split('-')[0]
+                    idx2 = rule.split(':')[0].split('-')[1]
+                    w = float(rule.split(':')[1])
+                    self.polymer_info.append((idx1, idx2, w))
+                # TODO: add check that weights for each attachment point add up to 1
             else:
                 mol = make_mol(mol, self.is_explicit_h, self.is_adding_hs)
 
@@ -311,13 +379,17 @@ class MolGraph:
         self.n_bonds = 0  # number of bonds
         self.f_atoms = []  # mapping from atom index to atom features
         self.f_bonds = []  # mapping from bond index to concat(in_atom, bond) features
+        self.w_bonds = []  # mapping from bond index to bond weight
         self.a2b = []  # mapping from atom index to incoming bond indices
         self.b2a = []  # mapping from bond index to the index of the atom the bond is coming from
         self.b2revb = []  # mapping from bond index to the index of the reverse bond
         self.overwrite_default_atom_features = overwrite_default_atom_features
         self.overwrite_default_bond_features = overwrite_default_bond_features
 
-        if not self.is_reaction:
+        # =============
+        # Standard mode
+        # =============
+        if not self.is_reaction and not self.is_polymer:
             # Get atom features
             self.f_atoms = [atom_features(atom) for atom in mol.GetAtoms()]
             if atom_features_extra is not None:
@@ -363,13 +435,141 @@ class MolGraph:
                     self.b2a.append(a2)
                     self.b2revb.append(b2)
                     self.b2revb.append(b1)
+                    self.w_bonds.extend([1.0, 1.0])  # edge weights of 1.
                     self.n_bonds += 2
 
             if bond_features_extra is not None and len(bond_features_extra) != self.n_bonds / 2:
                 raise ValueError(f'The number of bonds in {Chem.MolToSmiles(mol)} is different from the length of '
                                  f'the extra bond features')
 
-        else: # Reaction mode
+        # ============
+        # Polymer mode
+        # ============
+        if not self.is_reaction and self.is_polymer:
+            # make molecule editable
+            rwmol = Chem.rdchem.RWMol(mol)
+            # tag (i) attachment atoms and (ii) atoms for which features needs to be computed
+            rwmol = tag_atoms_in_repeating_unit(rwmol)
+
+            # -----------------
+            # Get atom features
+            # -----------------
+            # for all 'core' atoms, i.e. not R groups, as tagged before. Do this here so that atoms linked to
+            # R groups have the correct saturation
+            self.f_atoms = [atom_features(atom) for atom in rwmol.GetAtoms() if atom.GetBoolProp('core') is True]
+
+            if atom_features_extra is not None:
+                if overwrite_default_atom_features:
+                    self.f_atoms = [descs.tolist() for descs in atom_features_extra]
+                else:
+                    self.f_atoms = [f_atoms + descs.tolist() for f_atoms, descs in zip(self.f_atoms, atom_features_extra)]
+
+            self.n_atoms = len(self.f_atoms)
+            if atom_features_extra is not None and len(atom_features_extra) != self.n_atoms:
+                raise ValueError(f'The number of atoms in {Chem.MolToSmiles(mol)} is different from the length of '
+                                 f'the extra atom features')
+
+            # remove R groups -> now atoms in rdkit Mol object have the same order as self.f_atoms
+            rwmol = remove_wildcard_atoms(rwmol)
+
+            # Initialize atom to bond mapping for each atom
+            for _ in range(self.n_atoms):
+                self.a2b.append([])
+
+            # ---------------------------------------
+            # Get bond features for separate monomers
+            # ---------------------------------------
+            for a1 in range(self.n_atoms):
+                for a2 in range(a1 + 1, self.n_atoms):
+                    bond = rwmol.GetBondBetweenAtoms(a1, a2)
+
+                    if bond is None:
+                        continue
+
+                    f_bond = bond_features(bond)
+                    if bond_features_extra is not None:
+                        descr = bond_features_extra[bond.GetIdx()].tolist()
+                        if overwrite_default_bond_features:
+                            f_bond = descr
+                        else:
+                            f_bond += descr
+
+                    self.f_bonds.append(self.f_atoms[a1] + f_bond)
+                    self.f_bonds.append(self.f_atoms[a2] + f_bond)
+
+                    # Update index mappings
+                    b1 = self.n_bonds
+                    b2 = b1 + 1
+                    self.a2b[a2].append(b1)  # b1 = a1 --> a2
+                    self.b2a.append(a1)
+                    self.a2b[a1].append(b2)  # b2 = a2 --> a1
+                    self.b2a.append(a2)
+                    self.b2revb.append(b2)
+                    self.b2revb.append(b1)
+                    self.w_bonds.extend([1.0, 1.0])  # edge weights of 1.
+                    self.n_bonds += 2
+
+            # ---------------------------------------------------
+            # Get bond features for bonds between repeating units
+            # ---------------------------------------------------
+            # for all possible bonds between monomers:
+            # add bond -> compute bond features -> add to bond list -> remove bond
+            for r1, r2, w_bond in self.polymer_info:
+
+                # get index of attachment atoms
+                a1 = None
+                a2 = None
+                for atom in rwmol.GetAtoms():
+                    if atom.GetProp('R') == f'*{r1}':
+                        a1 = atom.GetIdx()
+                    if atom.GetProp('R') == f'*{r2}':
+                        a2 = atom.GetIdx()
+
+                assert a1 is not None
+                assert a2 is not None
+
+                # create bond
+                rwmol.AddBond(a1, a2, order=Chem.rdchem.BondType.names['SINGLE'])
+                # TODO: potentially allow user to provide bond type in the input
+                Chem.SanitizeMol(rwmol, Chem.SanitizeFlags.SANITIZE_ALL)
+
+                # get bond object and features
+                bond = rwmol.GetBondBetweenAtoms(a1, a2)
+                f_bond = bond_features(bond)
+                if bond_features_extra is not None:
+                    descr = bond_features_extra[bond.GetIdx()].tolist()
+                    if overwrite_default_bond_features:
+                        f_bond = descr
+                    else:
+                        f_bond += descr
+
+                self.f_bonds.append(self.f_atoms[a1] + f_bond)
+                self.f_bonds.append(self.f_atoms[a2] + f_bond)
+
+                # Update index mappings
+                b1 = self.n_bonds
+                b2 = b1 + 1
+                self.a2b[a2].append(b1)  # b1 = a1 --> a2
+                self.b2a.append(a1)
+                self.a2b[a1].append(b2)  # b2 = a2 --> a1
+                self.b2a.append(a2)
+                self.b2revb.append(b2)
+                self.b2revb.append(b1)
+                self.w_bonds.extend([w_bond, w_bond])  # add edge weights
+                self.n_bonds += 2
+
+                # remove bond
+                rwmol.RemoveBond(bond.GetBeginAtomIdx(), bond.GetEndAtomIdx())
+                Chem.SanitizeMol(rwmol, Chem.SanitizeFlags.SANITIZE_ALL)
+
+            if bond_features_extra is not None and len(bond_features_extra) != self.n_bonds / 2:
+                raise ValueError(f'The number of bonds in {Chem.MolToSmiles(mol)} is different from the length of '
+                                 f'the extra bond features')
+
+        # =============
+        # Reaction mode
+        # =============
+        elif self.is_reaction and not self.is_polymer:
             if atom_features_extra is not None:
                 raise NotImplementedError('Extra atom features are currently not supported for reactions')
             if bond_features_extra is not None:
@@ -502,11 +702,13 @@ class BatchMolGraph:
         f_atoms = [[0] * self.atom_fdim]  # atom features
         f_bonds = [[0] * self.bond_fdim]  # combined atom/bond features
         a2b = [[]]  # mapping from atom index to incoming bond indices
+        w_bonds = [0]  # mapping from bond index to edge weight
         b2a = [0]  # mapping from bond index to the index of the atom the bond is coming from
         b2revb = [0]  # mapping from bond index to the index of the reverse bond
         for mol_graph in mol_graphs:
             f_atoms.extend(mol_graph.f_atoms)
             f_bonds.extend(mol_graph.f_bonds)
+            w_bonds.extend(mol_graph.w_bonds)
 
             for a in range(mol_graph.n_atoms):
                 a2b.append([b + self.n_bonds for b in mol_graph.a2b[a]])
@@ -525,13 +727,14 @@ class BatchMolGraph:
 
         self.f_atoms = torch.FloatTensor(f_atoms)
         self.f_bonds = torch.FloatTensor(f_bonds)
+        self.w_bonds = torch.FloatTensor(w_bonds)
         self.a2b = torch.LongTensor([a2b[a] + [0] * (self.max_num_bonds - len(a2b[a])) for a in range(self.n_atoms)])
         self.b2a = torch.LongTensor(b2a)
         self.b2revb = torch.LongTensor(b2revb)
         self.b2b = None  # try to avoid computing b2b b/c O(n_atoms^3)
         self.a2a = None  # only needed if using atom messages
 
-    def get_components(self, atom_messages: bool = False) -> Tuple[torch.FloatTensor, torch.FloatTensor,
+    def get_components(self, atom_messages: bool = False) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor,
                                                                    torch.LongTensor, torch.LongTensor, torch.LongTensor,
                                                                    List[Tuple[int, int]], List[Tuple[int, int]]]:
         """
@@ -559,7 +762,7 @@ class BatchMolGraph:
         else:
             f_bonds = self.f_bonds
 
-        return self.f_atoms, f_bonds, self.a2b, self.b2a, self.b2revb, self.a_scope, self.b_scope
+        return self.f_atoms, f_bonds, self.w_bonds, self.a2b, self.b2a, self.b2revb, self.a_scope, self.b_scope
 
     def get_b2b(self) -> torch.LongTensor:
         """
