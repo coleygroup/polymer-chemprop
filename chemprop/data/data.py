@@ -11,7 +11,7 @@ from .scaler import StandardScaler
 from chemprop.features import get_features_generator
 from chemprop.features import BatchMolGraph, MolGraph
 from chemprop.features import is_explicit_h, is_reaction, is_adding_hs, is_polymer
-from chemprop.rdkit import make_mol
+from chemprop.rdkit import make_mol, make_polymer_mol
 
 # Cache of graph featurizations
 CACHE_GRAPH = True
@@ -694,7 +694,13 @@ def make_mols(smiles: List[str], reaction: bool, polymer: bool, keep_h: bool, ad
         mol = [SMILES_TO_MOL[s] if s in SMILES_TO_MOL else (make_mol(s.split(">")[0], keep_h, add_h), make_mol(s.split(">")[-1], keep_h, add_h)) for s in smiles]
     elif polymer:
         # TODO: use BigSMILES notation as input for polymers with a dedicated parser
-        mol = [SMILES_TO_MOL[s] if s in SMILES_TO_MOL else (make_mol(s.split("<")[0], keep_h, add_h), s.split("<")[1:]) for s in smiles]
+        # example input: CC([*:1])C.c1cnccc1CC[*:2]|0.2|0.8|<1-2:1<2-1:1
+        # |0.2|0.8| -> 20% of first fragment, 80% of second
+        # <1-2:1<2-1:1 -> directed edge 1->2 with weight 1, edge 2->1 with weight 1
+        mol = [SMILES_TO_MOL[s] if s in SMILES_TO_MOL else (make_polymer_mol(s.split("|")[0], keep_h, add_h,   # smiles
+                                                                             fragment_weights=s.split("|")[1:-1]),  # fraction of each fragment
+                                                            s.split("<")[1:])  # edges between fragments
+               for s in smiles]
     else:
         mol = [SMILES_TO_MOL[s] if s in SMILES_TO_MOL else make_mol(s, keep_h, add_h) for s in smiles]
     return mol

@@ -8,7 +8,7 @@ from rdkit import Chem
 import torch
 import numpy as np
 
-from chemprop.rdkit import make_mol
+from chemprop.rdkit import make_mol, make_polymer_mol
 
 class Featurization_parameters:
     """
@@ -326,16 +326,19 @@ def parse_polymer_rules(rules):
     polymer_info = []
     counter = Counter()  # used for validating the input
     for rule in rules:
+        if len(rule.split(':')) != 3:
+            raise ValueError(f'incorrect format for input information "{rule}"')
         idx1, idx2 = rule.split(':')[0].split('-')
-        w = float(rule.split(':')[1])
-        polymer_info.append((idx1, idx2, w))
-        counter[idx1] += float(w)
-        counter[idx2] += float(w)
+        w12 = float(rule.split(':')[1])  # weight for bond R_idx1 -> R_idx2
+        w21 = float(rule.split(':')[2])  # weight for bond R_idx2 -> R_idx1
+        polymer_info.append((idx1, idx2, w12, w21))
+        counter[idx1] += float(w21)
+        counter[idx2] += float(w12)
 
-    # validate input: sum of weights should be one
+    # validate input: sum of incoming weights should be one for each vertex
     for k, v in counter.items():
         if np.isclose(v, 1.0) is False:
-            raise ValueError(f'sum of input probabilities for stochastic edges should be 1 -- found {v} for [*:{k}]')
+            raise ValueError(f'sum of weights of incoming stochastic edges should be 1 -- found {v} for [*:{k}]')
 
     return polymer_info
 
@@ -383,7 +386,9 @@ class MolGraph:
                        make_mol(mol.split(">")[-1], self.is_explicit_h, self.is_adding_hs))
             elif self.is_polymer:
                 # TODO: use BigSMILES notation as input for polymers with a dedicated parser
-                mol = (make_mol(mol.split("<")[0], self.is_explicit_h, self.is_adding_hs), mol.split('<')[1:])
+                mol = (make_polymer_mol(mol.split("|")[0], self.is_explicit_h, self.is_adding_hs,  # smiles
+                                        fragment_weights=mol.split("|")[1:-1]),  # fraction of each fragment
+                       mol.split("<")[1:])  # edges between fragments
             else:
                 mol = make_mol(mol, self.is_explicit_h, self.is_adding_hs)
 
@@ -392,6 +397,7 @@ class MolGraph:
         self.f_atoms = []  # mapping from atom index to atom features
         self.f_bonds = []  # mapping from bond index to concat(in_atom, bond) features
         self.w_bonds = []  # mapping from bond index to bond weight
+        self.w_atoms = []  # mapping from atom index to atom weight
         self.a2b = []  # mapping from atom index to incoming bond indices
         self.b2a = []  # mapping from bond index to the index of the atom the bond is coming from
         self.b2revb = []  # mapping from bond index to the index of the reverse bond
@@ -404,6 +410,7 @@ class MolGraph:
         if not self.is_reaction and not self.is_polymer:
             # Get atom features
             self.f_atoms = [atom_features(atom) for atom in mol.GetAtoms()]
+            self.w_atoms = [1.] * len(mol.GetAtoms())
             if atom_features_extra is not None:
                 if overwrite_default_atom_features:
                     self.f_atoms = [descs.tolist() for descs in atom_features_extra]
@@ -458,6 +465,7 @@ class MolGraph:
         # Polymer mode
         # ============
         if not self.is_reaction and self.is_polymer:
+            # TODO: infer bond type from bond to R groups
             m = mol[0]  # RDKit Mol object
             rules = mol[1]  # [str], list of rules
             # parse rules on monomer connections
@@ -473,6 +481,7 @@ class MolGraph:
             # for all 'core' atoms, i.e. not R groups, as tagged before. Do this here so that atoms linked to
             # R groups have the correct saturation
             self.f_atoms = [atom_features(atom) for atom in rwmol.GetAtoms() if atom.GetBoolProp('core') is True]
+            self.w_atoms = [atom.GetDoubleProp('w_frag') for atom in rwmol.GetAtoms() if atom.GetBoolProp('core') is True]
 
             if atom_features_extra is not None:
                 if overwrite_default_atom_features:
@@ -540,7 +549,7 @@ class MolGraph:
 
             # for all possible bonds between monomers:
             # add bond -> compute bond features -> add to bond list -> remove bond
-            for r1, r2, w_bond in self.polymer_info:
+            for r1, r2, w_bond12, w_bond21 in self.polymer_info:
 
                 # get index of attachment atoms
                 a1 = None  # idx of atom 1 in rwmol
@@ -563,7 +572,6 @@ class MolGraph:
 
                 # create bond
                 cm.AddBond(a1, _a2, order=Chem.rdchem.BondType.names['SINGLE'])
-                # TODO: potentially allow user to provide bond type in the input
                 Chem.SanitizeMol(cm, Chem.SanitizeFlags.SANITIZE_ALL)
 
                 # get bond object and features
@@ -588,7 +596,7 @@ class MolGraph:
                 self.b2a.append(a2)
                 self.b2revb.append(b2)
                 self.b2revb.append(b1)
-                self.w_bonds.extend([w_bond, w_bond])  # add edge weights
+                self.w_bonds.extend([w_bond12, w_bond21])  # add edge weights
                 self.n_bonds += 2
 
                 # remove the bond
@@ -602,6 +610,8 @@ class MolGraph:
         # =============
         # Reaction mode
         # =============
+        # TODO: add compatibility of reaction mode with new polymer code that assumes presence of
+        #  self.w_bonds and self.w_atoms
         elif self.is_reaction and not self.is_polymer:
             if atom_features_extra is not None:
                 raise NotImplementedError('Extra atom features are currently not supported for reactions')
@@ -735,12 +745,14 @@ class BatchMolGraph:
         f_atoms = [[0] * self.atom_fdim]  # atom features
         f_bonds = [[0] * self.bond_fdim]  # combined atom/bond features
         a2b = [[]]  # mapping from atom index to incoming bond indices
+        w_atoms = [0]  # mapping from atom index to vertex weight
         w_bonds = [0]  # mapping from bond index to edge weight
         b2a = [0]  # mapping from bond index to the index of the atom the bond is coming from
         b2revb = [0]  # mapping from bond index to the index of the reverse bond
         for mol_graph in mol_graphs:
             f_atoms.extend(mol_graph.f_atoms)
             f_bonds.extend(mol_graph.f_bonds)
+            w_atoms.extend(mol_graph.w_atoms)
             w_bonds.extend(mol_graph.w_bonds)
 
             for a in range(mol_graph.n_atoms):
@@ -760,6 +772,7 @@ class BatchMolGraph:
 
         self.f_atoms = torch.FloatTensor(f_atoms)
         self.f_bonds = torch.FloatTensor(f_bonds)
+        self.w_atoms = torch.FloatTensor(w_atoms)
         self.w_bonds = torch.FloatTensor(w_bonds)
         self.a2b = torch.LongTensor([a2b[a] + [0] * (self.max_num_bonds - len(a2b[a])) for a in range(self.n_atoms)])
         self.b2a = torch.LongTensor(b2a)
@@ -795,7 +808,7 @@ class BatchMolGraph:
         else:
             f_bonds = self.f_bonds
 
-        return self.f_atoms, f_bonds, self.w_bonds, self.a2b, self.b2a, self.b2revb, self.a_scope, self.b_scope
+        return self.f_atoms, f_bonds, self.w_atoms, self.w_bonds, self.a2b, self.b2a, self.b2revb, self.a_scope, self.b_scope
 
     def get_b2b(self) -> torch.LongTensor:
         """

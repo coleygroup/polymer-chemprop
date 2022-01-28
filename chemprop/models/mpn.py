@@ -78,9 +78,11 @@ class MPNEncoder(nn.Module):
             atom_descriptors_batch = [np.zeros([1, atom_descriptors_batch[0].shape[1]])] + atom_descriptors_batch   # padding the first with 0 to match the atom_hiddens
             atom_descriptors_batch = torch.from_numpy(np.concatenate(atom_descriptors_batch, axis=0)).float().to(self.device)
 
-        f_atoms, f_bonds, w_bonds, a2b, b2a, b2revb, a_scope, b_scope = mol_graph.get_components(atom_messages=self.atom_messages)
-        f_atoms, f_bonds, w_bonds, a2b, b2a, b2revb = f_atoms.to(self.device), f_bonds.to(self.device), w_bonds.to(self.device), \
-                                                      a2b.to(self.device), b2a.to(self.device), b2revb.to(self.device)
+        f_atoms, f_bonds, w_atoms, w_bonds, a2b, b2a, b2revb, a_scope, b_scope = mol_graph.get_components(atom_messages=self.atom_messages)
+        f_atoms, f_bonds, w_atoms, w_bonds, a2b, b2a, b2revb = f_atoms.to(self.device), f_bonds.to(self.device), \
+                                                               w_atoms.to(self.device), w_bonds.to(self.device), \
+                                                               a2b.to(self.device), b2a.to(self.device), \
+                                                               b2revb.to(self.device)
 
         if self.atom_messages:
             a2a = mol_graph.get_a2a().to(self.device)
@@ -121,7 +123,9 @@ class MPNEncoder(nn.Module):
 
         a2x = a2a if self.atom_messages else a2b
         nei_a_message = index_select_ND(message, a2x)  # num_atoms x max_num_bonds x hidden
-        # NOTE: other place where we could have the weights
+        nei_a_weight = index_select_ND(w_bonds, a2x)  # num_atoms x max_num_bonds
+        # weight messages
+        nei_a_message = nei_a_message * nei_a_weight[..., None]  # num_atoms x max_num_bonds x hidden
         a_message = nei_a_message.sum(dim=1)  # num_atoms x hidden
         a_input = torch.cat([f_atoms, a_message], dim=1)  # num_atoms x (atom_fdim + hidden)
         atom_hiddens = self.act_func(self.W_o(a_input))  # num_atoms x hidden
@@ -144,8 +148,13 @@ class MPNEncoder(nn.Module):
             else:
                 cur_hiddens = atom_hiddens.narrow(0, a_start, a_size)
                 mol_vec = cur_hiddens  # (num_atoms, hidden_size)
+                w_atom_vec = w_atoms.narrow(0, a_start, a_size)
+                # if input are polymers, weight atoms from each repeating unit according to specified monomer fractions
+                # weight h by atom weights (weights are all 1 for non-polymer input)
+                mol_vec = w_atom_vec[..., None] * mol_vec
+                # weight each atoms at readout
                 if self.aggregation == 'mean':
-                    mol_vec = mol_vec.sum(dim=0) / a_size
+                    mol_vec = mol_vec.sum(dim=0) / w_atom_vec.sum(dim=0)  # if not --polymer, w_atom_vec.sum == a_size
                 elif self.aggregation == 'sum':
                     mol_vec = mol_vec.sum(dim=0)
                 elif self.aggregation == 'norm':
