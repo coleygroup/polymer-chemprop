@@ -284,8 +284,13 @@ def map_reac_to_prod(mol_reac: Chem.Mol, mol_prod: Chem.Mol):
 
 
 def tag_atoms_in_repeating_unit(mol):
+    """
+    Tags atoms that are part of the core units, as well as atoms serving to identify attachment points. In addition,
+    create a map of bond types based on what bonds are connected to R groups in the input.
+    """
     atoms = [a for a in mol.GetAtoms()]
-    neighbor_map = {}
+    neighbor_map = {}  # map atom index to R group it is attached to
+    r_bond_types = {}  # map R group to bond type
 
     # go through each atoms and: (i) get index of attachment atoms, (ii) tag all non-R atoms
     for atom in atoms:
@@ -295,9 +300,13 @@ def tag_atoms_in_repeating_unit(mol):
             neighbors = atom.GetNeighbors()
             assert len(neighbors) == 1
             neighbor_idx = neighbors[0].GetIdx()
-            neighbor_map[neighbor_idx] = atom.GetSmarts().strip('[]').replace(':', '')
+            r_tag = atom.GetSmarts().strip('[]').replace(':', '')  # *1, *2, ...
+            neighbor_map[neighbor_idx] = r_tag
             # tag it as non-core atom
             atom.SetBoolProp('core', False)
+            # create a map R --> bond type
+            bond = mol.GetBondBetweenAtoms(atom.GetIdx(), neighbor_idx)
+            r_bond_types[r_tag] = bond.GetBondType()
         # if not R atom
         else:
             # tag it as core atom
@@ -310,7 +319,7 @@ def tag_atoms_in_repeating_unit(mol):
         else:
             atom.SetProp('R', '')
 
-    return mol
+    return mol, r_bond_types
 
 
 def remove_wildcard_atoms(rwmol):
@@ -473,7 +482,8 @@ class MolGraph:
             # make molecule editable
             rwmol = Chem.rdchem.RWMol(m)
             # tag (i) attachment atoms and (ii) atoms for which features needs to be computed
-            rwmol = tag_atoms_in_repeating_unit(rwmol)
+            # also get map of R groups to bonds types, e.f. r_bond_types[*1] -> SINGLE
+            rwmol, r_bond_types = tag_atoms_in_repeating_unit(rwmol)
 
             # -----------------
             # Get atom features
@@ -571,7 +581,12 @@ class MolGraph:
                 assert _a2 is not None
 
                 # create bond
-                cm.AddBond(a1, _a2, order=Chem.rdchem.BondType.names['SINGLE'])
+                order1 = r_bond_types[f'*{r1}']
+                order2 = r_bond_types[f'*{r2}']
+                if order1 != order2:
+                    raise ValueError(f'two atoms are trying to be bonded with different bond types: '
+                                     f'{order1} vs {order2}')
+                cm.AddBond(a1, _a2, order=order1)
                 Chem.SanitizeMol(cm, Chem.SanitizeFlags.SANITIZE_ALL)
 
                 # get bond object and features
