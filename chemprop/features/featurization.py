@@ -289,7 +289,7 @@ def tag_atoms_in_repeating_unit(mol):
     create a map of bond types based on what bonds are connected to R groups in the input.
     """
     atoms = [a for a in mol.GetAtoms()]
-    neighbor_map = {}  # map atom index to R group it is attached to
+    neighbor_map = {}  # map R group to index of atom it is attached to
     r_bond_types = {}  # map R group to bond type
 
     # go through each atoms and: (i) get index of attachment atoms, (ii) tag all non-R atoms
@@ -301,7 +301,7 @@ def tag_atoms_in_repeating_unit(mol):
             assert len(neighbors) == 1
             neighbor_idx = neighbors[0].GetIdx()
             r_tag = atom.GetSmarts().strip('[]').replace(':', '')  # *1, *2, ...
-            neighbor_map[neighbor_idx] = r_tag
+            neighbor_map[r_tag] = neighbor_idx
             # tag it as non-core atom
             atom.SetBoolProp('core', False)
             # create a map R --> bond type
@@ -314,8 +314,9 @@ def tag_atoms_in_repeating_unit(mol):
 
     # use the map created to tag attachment atoms
     for atom in atoms:
-        if atom.GetIdx() in neighbor_map.keys():
-            atom.SetProp('R', neighbor_map[atom.GetIdx()])
+        if atom.GetIdx() in neighbor_map.values():
+            r_tags = [k for k, v in neighbor_map.items() if v == atom.GetIdx()]
+            atom.SetProp('R', ''.join(r_tags))
         else:
             atom.SetProp('R', '')
 
@@ -348,7 +349,6 @@ def parse_polymer_rules(rules):
     for k, v in counter.items():
         if np.isclose(v, 1.0) is False:
             raise ValueError(f'sum of weights of incoming stochastic edges should be 1 -- found {v} for [*:{k}]')
-
     return polymer_info
 
 
@@ -567,24 +567,18 @@ class MolGraph:
                 _a2 = None  # idx of atom 1 in cm --> to be used by RDKit
                 for atom in cm.GetAtoms():
                     # take a1 from a fragment in the original molecule object
-                    if atom.GetProp('R') == f'*{r1}' and atom.GetBoolProp('OrigMol') is True:
+                    if f'*{r1}' in atom.GetProp('R') and atom.GetBoolProp('OrigMol') is True:
                         a1 = atom.GetIdx()
                     # take _a2 from a fragment in the copied molecule object, but a2 from the original
-                    if atom.GetProp('R') == f'*{r2}':
+                    if f'*{r2}' in atom.GetProp('R'):
                         if atom.GetBoolProp('OrigMol') is True:
                             a2 = atom.GetIdx()
                         elif atom.GetBoolProp('OrigMol') is False:
                             _a2 = atom.GetIdx()
 
                 if a1 is None:
-                    import pickle
-                    with open('error_mol.pkl', 'wb') as f:
-                        pickle.dump(cm, f)
                     raise ValueError(f'cannot find atom attached to [*:{r1}]')
                 if a2 is None or _a2 is None:
-                    import pickle
-                    with open('error_mol.pkl', 'wb') as f:
-                        pickle.dump(cm, f)
                     raise ValueError(f'cannot find atom attached to [*:{r2}]')
 
                 # create bond
