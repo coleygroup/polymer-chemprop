@@ -577,14 +577,14 @@ class MolGraph:
                             _a2 = atom.GetIdx()
 
                 if a1 is None:
-                    smi = Chem.MolToSmiles(cm)
-                    with open('error_mol.txt',  'a') as f:
-                        f.write(smi)
+                    import pickle
+                    with open('error_mol.pkl',  'a') as f:
+                        pickle.dump(cm, f)
                     raise ValueError(f'cannot find atom attached to [*:{r1}]')
                 if a2 is None or _a2 is None:
-                    smi = Chem.MolToSmiles(cm)
-                    with open('error_mol.txt', 'a') as f:
-                        f.write(smi)
+                    import pickle
+                    with open('error_mol.pkl', 'a') as f:
+                        pickle.dump(cm, f)
                     raise ValueError(f'cannot find atom attached to [*:{r2}]')
 
                 # create bond
