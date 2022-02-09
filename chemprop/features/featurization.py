@@ -576,9 +576,12 @@ class MolGraph:
                         elif atom.GetBoolProp('OrigMol') is False:
                             _a2 = atom.GetIdx()
 
-                assert a1 is not None
-                assert a2 is not None
-                assert _a2 is not None
+                if a1 is None:
+                    raise ValueError(f'cannot find atom attached to [*:{r1}]')
+                if a2 is None:
+                    raise ValueError(f'cannot find atom attached to [*:{r2}]')
+                if _a2 is not None:
+                    raise ValueError(f'cannot find atom attached to [*:{r2}]')
 
                 # create bond
                 order1 = r_bond_types[f'*{r1}']
