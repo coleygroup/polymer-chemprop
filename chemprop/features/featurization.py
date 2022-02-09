@@ -578,12 +578,12 @@ class MolGraph:
 
                 if a1 is None:
                     import pickle
-                    with open('error_mol.pkl',  'a') as f:
+                    with open('error_mol.pkl', 'wb') as f:
                         pickle.dump(cm, f)
                     raise ValueError(f'cannot find atom attached to [*:{r1}]')
                 if a2 is None or _a2 is None:
                     import pickle
-                    with open('error_mol.pkl', 'a') as f:
+                    with open('error_mol.pkl', 'wb') as f:
                         pickle.dump(cm, f)
                     raise ValueError(f'cannot find atom attached to [*:{r2}]')
 
