@@ -336,6 +336,10 @@ def parse_polymer_rules(rules):
     polymer_info = []
     counter = Counter()  # used for validating the input
     for rule in rules:
+        # handle edge case where we have no rules, and rule is empty string
+        if rule == "":
+            continue
+        # QC of input string
         if len(rule.split(':')) != 3:
             raise ValueError(f'incorrect format for input information "{rule}"')
         idx1, idx2 = rule.split(':')[0].split('-')
