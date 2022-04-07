@@ -335,6 +335,14 @@ def remove_wildcard_atoms(rwmol):
 def parse_polymer_rules(rules):
     polymer_info = []
     counter = Counter()  # used for validating the input
+
+    # check if deg of polymerization is provided
+    if '~' in rules[-1]:
+        Xn = float(rules[-1].split('~')[1])
+        rules[-1] = rules[-1].split('~')[0]
+    else:
+        Xn = 1.
+
     for rule in rules:
         # handle edge case where we have no rules, and rule is empty string
         if rule == "":
@@ -353,7 +361,7 @@ def parse_polymer_rules(rules):
     for k, v in counter.items():
         if np.isclose(v, 1.0) is False:
             raise ValueError(f'sum of weights of incoming stochastic edges should be 1 -- found {v} for [*:{k}]')
-    return polymer_info
+    return polymer_info, Xn
 
 
 class MolGraph:
@@ -407,6 +415,7 @@ class MolGraph:
 
         self.n_atoms = 0  # number of atoms
         self.n_bonds = 0  # number of bonds
+        self.degree_of_polym = 1  # degree of polymerization
         self.f_atoms = []  # mapping from atom index to atom features
         self.f_bonds = []  # mapping from bond index to concat(in_atom, bond) features
         self.w_bonds = []  # mapping from bond index to bond weight
@@ -482,7 +491,7 @@ class MolGraph:
             m = mol[0]  # RDKit Mol object
             rules = mol[1]  # [str], list of rules
             # parse rules on monomer connections
-            self.polymer_info = parse_polymer_rules(rules)
+            self.polymer_info, self.degree_of_polym = parse_polymer_rules(rules)
             # make molecule editable
             rwmol = Chem.rdchem.RWMol(m)
             # tag (i) attachment atoms and (ii) atoms for which features needs to be computed
@@ -760,6 +769,7 @@ class BatchMolGraph:
         self.n_bonds = 1  # number of bonds (start at 1 b/c need index 0 as padding)
         self.a_scope = []  # list of tuples indicating (start_atom_index, num_atoms) for each molecule
         self.b_scope = []  # list of tuples indicating (start_bond_index, num_bonds) for each molecule
+        self.degree_of_polym = []  # list of floats with degree of polymerization used when --polymer
 
         # All start with zero padding so that indexing with zero padding returns zeros
         f_atoms = [[0] * self.atom_fdim]  # atom features
@@ -787,6 +797,8 @@ class BatchMolGraph:
             self.n_atoms += mol_graph.n_atoms
             self.n_bonds += mol_graph.n_bonds
 
+            self.degree_of_polym.append(mol_graph.degree_of_polym)
+
         self.max_num_bonds = max(1, max(
             len(in_bonds) for in_bonds in a2b))  # max with 1 to fix a crash in rare case of all single-heavy-atom mols
 
@@ -800,9 +812,11 @@ class BatchMolGraph:
         self.b2b = None  # try to avoid computing b2b b/c O(n_atoms^3)
         self.a2a = None  # only needed if using atom messages
 
-    def get_components(self, atom_messages: bool = False) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor,
+    def get_components(self, atom_messages: bool = False) -> Tuple[torch.FloatTensor, torch.FloatTensor,
+                                                                   torch.FloatTensor, torch.FloatTensor,
                                                                    torch.LongTensor, torch.LongTensor, torch.LongTensor,
-                                                                   List[Tuple[int, int]], List[Tuple[int, int]]]:
+                                                                   List[Tuple[int, int]], List[Tuple[int, int]],
+                                                                   List[float]]:
         """
         Returns the components of the :class:`BatchMolGraph`.
 
@@ -828,7 +842,8 @@ class BatchMolGraph:
         else:
             f_bonds = self.f_bonds
 
-        return self.f_atoms, f_bonds, self.w_atoms, self.w_bonds, self.a2b, self.b2a, self.b2revb, self.a_scope, self.b_scope
+        return self.f_atoms, f_bonds, self.w_atoms, self.w_bonds, self.a2b, self.b2a, self.b2revb, \
+               self.a_scope, self.b_scope, self.degree_of_polym
 
     def get_b2b(self) -> torch.LongTensor:
         """

@@ -78,7 +78,9 @@ class MPNEncoder(nn.Module):
             atom_descriptors_batch = [np.zeros([1, atom_descriptors_batch[0].shape[1]])] + atom_descriptors_batch   # padding the first with 0 to match the atom_hiddens
             atom_descriptors_batch = torch.from_numpy(np.concatenate(atom_descriptors_batch, axis=0)).float().to(self.device)
 
-        f_atoms, f_bonds, w_atoms, w_bonds, a2b, b2a, b2revb, a_scope, b_scope = mol_graph.get_components(atom_messages=self.atom_messages)
+        f_atoms, f_bonds, w_atoms, w_bonds, a2b, b2a, b2revb, \
+        a_scope, b_scope, degree_of_polym = mol_graph.get_components(atom_messages=self.atom_messages)
+
         f_atoms, f_bonds, w_atoms, w_bonds, a2b, b2a, b2revb = f_atoms.to(self.device), f_bonds.to(self.device), \
                                                                w_atoms.to(self.device), w_bonds.to(self.device), \
                                                                a2b.to(self.device), b2a.to(self.device), \
@@ -159,6 +161,11 @@ class MPNEncoder(nn.Module):
                     mol_vec = mol_vec.sum(dim=0)
                 elif self.aggregation == 'norm':
                     mol_vec = mol_vec.sum(dim=0) / self.aggregation_norm
+
+                # if input are polymers, multiply mol vectors by degree of polymerization
+                # if not --polymer, Xn is 1
+                mol_vec = degree_of_polym[i] * mol_vec
+
                 mol_vecs.append(mol_vec)
 
         mol_vecs = torch.stack(mol_vecs, dim=0)  # (num_molecules, hidden_size)
