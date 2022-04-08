@@ -361,7 +361,7 @@ def parse_polymer_rules(rules):
     for k, v in counter.items():
         if np.isclose(v, 1.0) is False:
             raise ValueError(f'sum of weights of incoming stochastic edges should be 1 -- found {v} for [*:{k}]')
-    return polymer_info, Xn
+    return polymer_info, 1. + np.log10(Xn)
 
 
 class MolGraph:
