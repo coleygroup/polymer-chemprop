@@ -351,6 +351,10 @@ class TrainArgs(CommonArgs):
     """Aggregation scheme for atomic vectors into molecular vectors"""
     aggregation_norm: int = 100
     """For norm aggregation, number by which to divide summed up atomic features"""
+    polymer: bool = False
+    """
+    Whether to adjust the MPNN to take polymers as input instead of molecules.
+    """
     reaction: bool = False
     """
     Whether to adjust MPNN layer to take reactions as input instead of molecules.

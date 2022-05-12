@@ -9,7 +9,7 @@ from chemprop.args import FingerprintArgs, TrainArgs
 from chemprop.data import get_data, get_data_from_smiles, MoleculeDataLoader, MoleculeDataset
 from chemprop.utils import load_args, load_checkpoint, makedirs, timeit, load_scalers, update_prediction_args
 from chemprop.data import MoleculeDataLoader, MoleculeDataset
-from chemprop.features import set_reaction, set_explicit_h, set_adding_hs, reset_featurization_parameters
+from chemprop.features import set_reaction, set_explicit_h, set_adding_hs, reset_featurization_parameters, set_polymer
 from chemprop.models import MoleculeModel
 
 @timeit()
@@ -34,11 +34,12 @@ def molecule_fingerprint(args: FingerprintArgs, smiles: List[List[str]] = None) 
     update_prediction_args(predict_args=args, train_args=train_args, validate_feature_sources=validate_feature_sources)
     args: Union[FingerprintArgs, TrainArgs]
 
-    #set explicit H option and reaction option
+    # set explicit H option and reaction option
     reset_featurization_parameters()
     set_explicit_h(train_args.explicit_h)
     set_adding_hs(args.adding_h)
     set_reaction(train_args.reaction, train_args.reaction_mode)
+    set_polymer(train_args.polymer)
 
     print('Loading data')
     if smiles is not None:

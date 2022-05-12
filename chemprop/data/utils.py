@@ -163,9 +163,15 @@ def filter_invalid_smiles(data: MoleculeDataset) -> MoleculeDataset:
     :return: A :class:`~chemprop.data.MoleculeDataset` with only the valid molecules.
     """
     return MoleculeDataset([datapoint for datapoint in tqdm(data)
-                            if all(s != '' for s in datapoint.smiles) and all(m is not None for m in datapoint.mol)
-                            and all(m.GetNumHeavyAtoms() > 0 for m in datapoint.mol if not isinstance(m, tuple))
-                            and all(m[0].GetNumHeavyAtoms() + m[1].GetNumHeavyAtoms() > 0 for m in datapoint.mol if isinstance(m, tuple))])
+                            if all(s != '' for s in datapoint.smiles)
+                            and all(m is not None for m in datapoint.mol)
+                            and all(m.GetNumHeavyAtoms() > 0 for m in datapoint.mol
+                                    if not isinstance(m, tuple))
+                            and all(m[0].GetNumHeavyAtoms() + m[1].GetNumHeavyAtoms() > 0 for m in datapoint.mol
+                                    if isinstance(m, tuple) and not isinstance(m[1], list))
+                            and all(m[0].GetNumHeavyAtoms() > 0 for m in datapoint.mol
+                                    if isinstance(m, tuple) and isinstance(m[1], list))
+                            ])
 
 
 def get_data(path: str,
