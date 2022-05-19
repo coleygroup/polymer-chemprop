@@ -1,5 +1,5 @@
 # wD-MPNN for Polymer Property Prediction
-This repository contains the weighted, directed message passing neural network (wD-MPNN) used for polymer property prediction in the paper [A graph representation of molecular ensembles for polymer property prediction](#). For the reference Chemprop code, please go to https://github.com/chemprop/chemprop.
+This repository contains the weighted, directed message passing neural network (wD-MPNN) used for polymer property prediction in the paper ["A graph representation of molecular ensembles for polymer property prediction"](https://arxiv.org/abs/2205.08619). For the reference Chemprop code, please go to https://github.com/chemprop/chemprop.
 
 ## Usage
 For general Chemprop usage, please refer to its documentation: https://chemprop.readthedocs.io/en/latest/.
@@ -29,8 +29,8 @@ If you use this code, please cite:
       title={A graph representation of molecular ensembles for polymer property prediction}, 
       author={Matteo Aldeghi and Connor W. Coley},
       year={2022},
-      eprint={},
+      eprint={2205.08619},
       archivePrefix={arXiv},
-      primaryClass={}
+      primaryClass={cs.LG}
 }
 ```
