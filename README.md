@@ -1,5 +1,5 @@
 # wD-MPNN for Polymer Property Prediction
-This repository contains the weighted, directed message passing neural network (wD-MPNN) used for polymer property prediction in the paper ["A graph representation of molecular ensembles for polymer property prediction"](https://arxiv.org/abs/2205.08619). For the reference Chemprop code, please go to https://github.com/chemprop/chemprop.
+This repository contains the weighted, directed message passing neural network (wD-MPNN) used for polymer property prediction in the paper ["A graph representation of molecular ensembles for polymer property prediction" (Chem. Sci. 2022,13, 10486-10498)](https://pubs.rsc.org/en/content/articlelanding/2022/SC/D2SC02839E). For the reference Chemprop code, please go to https://github.com/chemprop/chemprop.
 
 ## Usage
 For general Chemprop usage, please refer to its documentation: https://chemprop.readthedocs.io/en/latest/.
@@ -25,12 +25,16 @@ In the example above, the file `input.csv` would contain an extended string repr
 If you use this code, please cite:
 
 ```
-@misc{wdmpnn,
-      title={A graph representation of molecular ensembles for polymer property prediction}, 
-      author={Matteo Aldeghi and Connor W. Coley},
-      year={2022},
-      eprint={2205.08619},
-      archivePrefix={arXiv},
-      primaryClass={cs.LG}
+@article{wdmpnn,
+         title={A graph representation of molecular ensembles for polymer property prediction}, 
+         author={Matteo Aldeghi and Connor W. Coley},
+         journal="Chem. Sci.",
+         year="2022",
+         volume="13",
+         issue="35",
+         pages="10486-10498",
+         publisher="The Royal Society of Chemistry",
+         doi="10.1039/D2SC02839E",
+         url="http://dx.doi.org/10.1039/D2SC02839E"
 }
 ```
